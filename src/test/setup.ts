@@ -1,0 +1,1 @@
+import '@testing-library/jest-dom/vitest';import 'fake-indexeddb/auto';import {webcrypto}from'node:crypto';Object.defineProperty(globalThis,'crypto',{value:webcrypto});Object.defineProperty(globalThis.crypto,'randomUUID',{value:()=>`00000000-0000-4000-8000-${Math.random().toString().slice(2,14).padEnd(12,'0')}`});

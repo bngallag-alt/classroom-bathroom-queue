@@ -1,0 +1,8 @@
+export type PassType='bathroom'|'water';
+export type Student={id:string;name:string;studentId:string;createdAt:string;updatedAt:string;deletedAt?:string;organizationId?:string;schoolId?:string;maxUses?:number|null;banned?:boolean};
+export type ClassRecord={id:string;createdAt:string;updatedAt:string;deletedAt?:string;organizationId?:string;schoolId?:string;courseTitle?:string;period?:string;sectionNumber?:string;courseId?:string;teacherName?:string;calendar?:string;room?:string;schoolYear?:string};
+export type Enrollment={id:string;studentId:string;classId:string;createdAt:string;updatedAt:string;deletedAt?:string};
+export type QueueEntry={id:string;studentId:string;queuedAt:string;status:'waiting'|'active';startedAt?:string;passType?:PassType;createdAt?:string;updatedAt?:string;deletedAt?:string};
+export type Session={id:string;studentId:string;studentName:string;studentIdSnapshot:string;queuedAt:string;startedAt:string;endedAt:string;durationSeconds:number;durationFormatted:string;reachedWarning:boolean;overLimit:boolean;status:'completed'|'teacher-canceled';passType?:PassType;classId?:string;createdAt?:string;updatedAt?:string;deletedAt?:string};
+export type Settings={id:'settings';warningSeconds:number;overLimitSeconds:number;pinHash:string;pinSalt:string;idDisplay:'masked'|'full'|'name';schemaVersion:number;setupComplete:boolean;globalUseLimit:number;countWaterAsBathroom:boolean;currentClassId?:string};
+export type Backup={format:'classroom-bathroom-queue';backupVersion:2;schemaVersion:2;exportedAt:string;students:Student[];classes:ClassRecord[];enrollments:Enrollment[];queue:QueueEntry[];sessions:Session[];settings:Omit<Settings,'pinHash'|'pinSalt'> & {pinProtected:true}};

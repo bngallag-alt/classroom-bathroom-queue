@@ -1,0 +1,14 @@
+import type{Table}from'dexie';import{db}from'./db';import type{Student,QueueEntry,Session,Settings,ClassRecord,Enrollment}from'./types';
+
+export interface Repository<T>{get(id:string):Promise<T|undefined>;list():Promise<T[]>;put(value:T):Promise<unknown>;add(value:T):Promise<unknown>;update(id:string,changes:Partial<T>):Promise<number>;delete(id:string):Promise<void>;clear():Promise<void>}
+class IndexedDbRepository<T extends{id:string}>implements Repository<T>{constructor(protected table:Table<T,string>){}get(id:string){return this.table.get(id)}list(){return this.table.toArray()}put(value:T){return this.table.put(value)}add(value:T){return this.table.add(value)}update(id:string,changes:Partial<T>){return this.table.update(id,changes as never)}async delete(id:string){await this.table.delete(id)}async clear(){await this.table.clear()}}
+export interface StudentRepository extends Repository<Student>{findByExternalId(studentId:string):Promise<Student|undefined>}
+export class IndexedDbStudentRepository extends IndexedDbRepository<Student>implements StudentRepository{constructor(){super(db.students)}findByExternalId(studentId:string){return this.table.where('studentId').equals(studentId).first()}}
+export interface QueueRepository extends Repository<QueueEntry>{findByStudent(studentId:string):Promise<QueueEntry|undefined>;ordered():Promise<QueueEntry[]>}
+export class IndexedDbQueueRepository extends IndexedDbRepository<QueueEntry>implements QueueRepository{constructor(){super(db.queue)}findByStudent(studentId:string){return this.table.where('studentId').equals(studentId).first()}async ordered(){return(await this.list()).sort((a,b)=>a.queuedAt.localeCompare(b.queuedAt))}}
+export interface BathroomSessionRepository extends Repository<Session>{forStudent(studentId:string):Promise<Session[]>;forClass(classId:string):Promise<Session[]>}
+export class IndexedDbBathroomSessionRepository extends IndexedDbRepository<Session>implements BathroomSessionRepository{constructor(){super(db.sessions)}forStudent(studentId:string){return this.table.where('studentId').equals(studentId).toArray()}forClass(classId:string){return this.table.where('classId').equals(classId).toArray()}}
+export class IndexedDbSettingsRepository extends IndexedDbRepository<Settings>{constructor(){super(db.settings)}}
+export class IndexedDbClassRepository extends IndexedDbRepository<ClassRecord>{constructor(){super(db.classes)}}
+export class IndexedDbEnrollmentRepository extends IndexedDbRepository<Enrollment>{constructor(){super(db.enrollments)}async forStudent(studentId:string){return db.enrollments.where('studentId').equals(studentId).toArray()}}
+export const repositories={students:new IndexedDbStudentRepository(),queue:new IndexedDbQueueRepository(),sessions:new IndexedDbBathroomSessionRepository(),settings:new IndexedDbSettingsRepository(),classes:new IndexedDbClassRepository(),enrollments:new IndexedDbEnrollmentRepository()};

@@ -1,0 +1,90 @@
+.student-queue-button {
+  background: #b4232c;
+  border-color: #8d1820;
+  color: #fff;
+}
+
+.return-button {
+  background: #1769aa;
+  border-color: #0f4f83;
+  color: #fff;
+}
+
+.tr.stats-row {
+  grid-template-columns: 1.5fr repeat(5, 1fr);
+}
+
+.water-button {
+  background: #1677a8;
+  border-color: #0d577e;
+  color: #fff;
+}
+
+.student-pass-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.teacher nav .student-mode-nav {
+  background: #126a62;
+  border-color: #126a62;
+  color: #fff;
+}
+
+.usage-settings {
+  margin-bottom: 1rem;
+}
+
+.check-label {
+  align-items: center;
+  flex-direction: row !important;
+}
+
+.check-label input {
+  min-height: auto !important;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.roster-import {
+  margin-bottom: 1rem;
+}
+
+.aeries-modal {
+  max-height: 92vh;
+  max-width: 1100px;
+  overflow: auto;
+}
+
+.aeries-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.aeries-table {
+  margin-top: 1rem;
+  overflow: auto;
+}
+
+.aeries-row {
+  display: grid;
+  grid-template-columns: .55fr 1.5fr .8fr .5fr 1fr 1.5fr;
+  min-width: 900px;
+  border-top: 1px solid #d8e1e7;
+  padding: .7rem;
+  gap: .5rem;
+}
+
+.aeries-row.head {
+  background: #e9f0f4;
+  font-weight: 800;
+}
+
+.replace-name {
+  display: block !important;
+  font-size: .85rem;
+  margin-top: .4rem !important;
+}
