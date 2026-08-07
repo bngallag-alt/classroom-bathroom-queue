@@ -16,6 +16,8 @@ The current application is local-first and single-teacher. Student records, clas
 
 Students have internal UUIDs distinct from their unique district student IDs. Aeries imports retain class metadata and create enrollment relationships, so one student can belong to several classes without duplication. Sessions optionally record the class currently designated for the kiosk. Statistics remain calculated from session records; aggregate calculations need not depend on names.
 
+Bell schedules and queue-history records are also local repository entities. The schedule engine resolves the current block from local date and time, while application services reconcile class transitions and record why a waiting entry left the queue. Bathroom sessions remain separate from queue history, so unmet demand is never counted as bathroom use. A future synchronized implementation could carry these records through the same repository boundary without changing the kiosk screens.
+
 The local teacher PIN is a classroom access deterrent. It is not a teacher identity, account, or authentication credential.
 
 ## Possible future architecture
