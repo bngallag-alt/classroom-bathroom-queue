@@ -84,6 +84,7 @@ test('history deletion, factory reset, and setup-screen backup recovery work',as
 });
 
 test('Aeries class associations, kiosk class selection, and local-only operation',async({page})=>{
+ await page.addInitScript(()=>{let fullscreen=false;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen?document.documentElement:null});Element.prototype.requestFullscreen=async()=>{fullscreen=true;document.dispatchEvent(new Event('fullscreenchange'))};document.exitFullscreen=async()=>{fullscreen=false;document.dispatchEvent(new Event('fullscreenchange'))}});
  const remoteRequests:string[]=[];
  page.on('request',request=>{const url=new URL(request.url());if(!['127.0.0.1','localhost'].includes(url.hostname))remoteRequests.push(request.url())});
  await setup(page);
@@ -104,6 +105,7 @@ test('Aeries class associations, kiosk class selection, and local-only operation
  expect(stored.enrollments).toHaveLength(2);
  expect(stored.settings.currentClassId).toBeTruthy();
  expect(remoteRequests).toEqual([]);
+ await page.getByRole('navigation').getByRole('button',{name:'Return to student mode'}).click();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();await keypad(page,'170000');await expect(page.getByRole('button',{name:/Thomas L Almond/})).toBeVisible();
 });
 
 test('Ctrl+Shift+6 clears only waiting students and Undo restores exact queue state',async({page})=>{
