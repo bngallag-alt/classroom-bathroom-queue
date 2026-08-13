@@ -12,6 +12,7 @@ const state=(day:number,time:string,schedule:BellSchedule=mapped())=>{const[h,m]
 describe('built-in bell schedule',()=>{
  it.each([[1,'08:44','non-class'],[1,'08:45','P1'],[1,'10:15','passing'],[1,'10:25','P3'],[1,'12:00','lunch'],[1,'12:36','passing'],[1,'12:40','P5'],[1,'14:20','P7'],[1,'15:50','non-class'],[2,'08:45','P2'],[2,'10:25','P4'],[2,'12:40','PCBL'],[2,'13:35','P6'],[3,'08:45','P1'],[3,'09:35','passing'],[3,'09:40','P2'],[3,'10:30','break'],[3,'10:40','P3'],[3,'11:35','P4'],[3,'12:30','lunch'],[3,'13:10','P5'],[3,'14:05','P6'],[3,'14:55','passing'],[3,'15:05','P7'],[3,'15:55','non-class'],[4,'10:25','P3'],[5,'13:35','P6']] as const)('resolves day %s at %s as %s',(day,time,expected)=>{const result=state(day,time);expect(result.block?.periodKey??result.kind).toBe(expected)});
  it('suggests only recognizable P1-P7 mappings',()=>{const t=new Date().toISOString(),classes=[{id:'p3',period:'P3',createdAt:t,updatedAt:t},{id:'p6',calendar:'P6',createdAt:t,updatedAt:t},{id:'unclear',period:'Advisory',createdAt:t,updatedAt:t}];const result=applySuggestedMappings(builtInDefaultSchedule(),classes);expect(result.days[1].find(x=>x.periodKey==='P3')?.classId).toBe('p3');expect(result.days[2].find(x=>x.periodKey==='P6')?.classId).toBe('p6');expect(JSON.stringify(result)).not.toContain('unclear')});
+ it('keeps the bathroom line open when no class is active',()=>{expect(state(1,'08:44').lineOpen).toBe(true);expect(state(1,'10:15').lineOpen).toBe(true);expect(state(1,'12:00').lineOpen).toBe(true)});
 });
 
 const stamp='2026-08-03T15:00:00.000Z';

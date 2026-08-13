@@ -69,7 +69,7 @@ test('Aeries TXT preview covers all classes, cancel is safe, and selected studen
 test('water passes, usage limits, bans, counting preference, and persistent student navigation',async({page})=>{
  await page.addInitScript(()=>{let fullscreen=false;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen?document.documentElement:null});Element.prototype.requestFullscreen=async()=>{fullscreen=true;document.dispatchEvent(new Event('fullscreenchange'))};document.exitFullscreen=async()=>{fullscreen=false;document.dispatchEvent(new Event('fullscreenchange'))}});await setup(page);await openTeacher(page);const returnToStudents=page.getByRole('navigation').getByRole('button',{name:'Return to student mode'});await expect(returnToStudents).toBeVisible();
  await page.getByRole('button',{name:'Roster',exact:true}).click();await expect(page.getByLabel('Ban this student from bathroom and water passes')).toHaveCount(0);await page.locator('.adminrow').filter({hasText:'Jordan Lee'}).getByRole('button',{name:'Edit'}).click();await page.getByLabel('Individual use limit').fill('1');await page.getByRole('button',{name:'Save changes'}).click();const alexRow=page.locator('.adminrow').filter({hasText:'Alex Rivera'});await alexRow.getByRole('button',{name:'Ban',exact:true}).click();await expect(alexRow).toContainText('Banned');await expect(alexRow.getByRole('button',{name:'Unban'})).toBeVisible();
- await page.getByRole('button',{name:'Settings'}).click();await page.getByLabel('Global completed-use limit').fill('2');await expect(page.getByLabel('Count completed water passes in statistics and toward use limits')).not.toBeChecked();await page.getByRole('button',{name:'Save usage limits'}).click();await returnToStudents.click();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();
+ await page.getByRole('button',{name:'Settings'}).click();await page.getByLabel('Bathroom Passes').fill('2');await expect(page.getByLabel('Count completed water passes in statistics and toward use limits')).not.toBeChecked();await page.getByRole('button',{name:'Save usage limits'}).click();await returnToStudents.click();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();
  await keypad(page,'001482');await page.getByRole('button',{name:/Jordan Lee/}).click();await page.getByRole('button',{name:'Add my name for water (90 seconds)'}).click();await page.getByRole('button',{name:"I'm ready to get water"}).click();await changeActiveStart(page,91);await page.reload();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();await expect(page.getByText('Water pass over 90 seconds')).toBeVisible();await page.getByRole('button',{name:"I'm back"}).click();
  await openTeacher(page);await page.getByRole('button',{name:'Stats'}).click();await expect(page.locator('.tr').filter({hasText:'Jordan Lee'})).toContainText('0');await page.getByRole('button',{name:'Settings'}).click();await page.getByLabel('Count completed water passes in statistics and toward use limits').check();await page.getByRole('button',{name:'Save usage limits'}).click();await page.getByRole('button',{name:'Stats'}).click();await expect(page.locator('.tr').filter({hasText:'Jordan Lee'})).toContainText('1');
  await page.getByRole('navigation').getByRole('button',{name:'Return to student mode'}).click();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();await keypad(page,'001482');await page.getByRole('button',{name:/Jordan Lee/}).click();await page.getByRole('button',{name:'Add my name for the bathroom'}).click();await expect(page.getByText('You have reached your limit of 1 use.')).toBeVisible();await page.getByRole('button',{name:'Back to home page'}).click();await keypad(page,'001937');await page.getByRole('button',{name:/Alex Rivera/}).click();await page.getByRole('button',{name:'Add my name for the bathroom'}).click();await expect(page.getByText('Bathroom and water passes are not available for this student.')).toBeVisible();
@@ -83,7 +83,7 @@ test('history deletion, factory reset, and setup-screen backup recovery work',as
  await page.getByRole('button',{name:'Factory Reset',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('Factory Reset');await page.getByLabel('Confirm teacher PIN').fill('2468');await page.getByLabel('I understand that all local app data will be erased.').check();await page.getByRole('button',{name:'Factory Reset Permanently'}).click();await expect(page.getByText('Create your teacher PIN')).toBeVisible();await page.getByLabel('Teacher PIN',{exact:true}).fill('8642');await page.getByLabel('Confirm PIN').fill('8642');await page.getByRole('button',{name:'Continue',exact:true}).click();await page.locator('input[type=file][accept*="json"]').setInputFiles(recoveryPath);await expect(page.getByText('Valid full backup ready')).toBeVisible();await page.getByRole('button',{name:'Confirm Restore Full Backup'}).click();await expect(page.getByText('Ready for class')).toBeVisible();await page.keyboard.press('Control+Shift+5');await page.getByLabel('Teacher PIN').fill('8642');await page.getByRole('button',{name:'Continue'}).click();await page.getByRole('button',{name:'Roster',exact:true}).click();await expect(page.getByText('Jordan Lee')).toBeVisible();
 });
 
-test('Aeries class associations, kiosk class selection, and local-only operation',async({page})=>{
+test('Aeries class associations, hidden schedule controls, and local-only operation',async({page})=>{
  await page.addInitScript(()=>{let fullscreen=false;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen?document.documentElement:null});Element.prototype.requestFullscreen=async()=>{fullscreen=true;document.dispatchEvent(new Event('fullscreenchange'))};document.exitFullscreen=async()=>{fullscreen=false;document.dispatchEvent(new Event('fullscreenchange'))}});
  const remoteRequests:string[]=[];
  page.on('request',request=>{const url=new URL(request.url());if(!['127.0.0.1','localhost'].includes(url.hostname))remoteRequests.push(request.url())});
@@ -93,17 +93,11 @@ test('Aeries class associations, kiosk class selection, and local-only operation
  await page.locator('input[type=file][accept*="text/plain"]').setInputFiles({name:'aeries-roster.txt',mimeType:'text/plain',buffer:Buffer.from(aeriesFixture)});
  await page.getByRole('button',{name:'Import selected students'}).click();
  await page.getByRole('button',{name:'Settings'}).click();
- const classSelect=page.getByLabel('Available Class');
- await expect(classSelect.locator('option')).toHaveCount(3);
- const p6Value=await classSelect.locator('option').filter({hasText:'P6 — Civics'}).getAttribute('value');
- await classSelect.selectOption(p6Value!);
- await page.getByLabel('Pause automatic scheduling for the rest of today').check();
- await page.getByRole('button',{name:'Switch Class / Period'}).click();
- await expect(page.getByText('Class switched. Active bathroom timers were preserved.')).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Switch Class / Period'})).not.toBeVisible();
+ await expect(page.getByRole('heading',{name:'Bell Schedule'})).not.toBeVisible();
  const stored=await page.evaluate(async()=>{const request=indexedDB.open('ClassroomBathroomQueue');const database=await new Promise<IDBDatabase>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});const read=(store:string)=>new Promise<any[]>((resolve,reject)=>{const tx=database.transaction(store),get=tx.objectStore(store).getAll();get.onsuccess=()=>resolve(get.result);get.onerror=()=>reject(get.error)});return{classes:await read('classes'),enrollments:await read('enrollments'),settings:(await read('settings'))[0]}});
  expect(stored.classes).toHaveLength(2);
  expect(stored.enrollments).toHaveLength(2);
- expect(stored.settings.currentClassId).toBeTruthy();
  expect(remoteRequests).toEqual([]);
  await page.getByRole('navigation').getByRole('button',{name:'Return to student mode'}).click();await page.getByRole('button',{name:'Start Bathroom Kiosk'}).click();await keypad(page,'170000');await expect(page.getByRole('button',{name:/Thomas L Almond/})).toBeVisible();
 });
@@ -126,10 +120,10 @@ test('Ctrl+Shift+6 clears only waiting students and Undo restores exact queue st
  expect(after.sort((a,b)=>a.queuedAt.localeCompare(b.queuedAt))).toEqual(before.sort((a,b)=>a.queuedAt.localeCompare(b.queuedAt)));
 });
 
-test('teacher can edit bell times, restore defaults, and see automatic class mappings',async({page})=>{
+test('teacher schedule controls are hidden while their saved data remains intact',async({page})=>{
  await setup(page);await openTeacher(page);await page.getByRole('button',{name:'Roster',exact:true}).click();await page.locator('input[type=file][accept*="text/plain"]').setInputFiles({name:'aeries-roster.txt',mimeType:'text/plain',buffer:Buffer.from(aeriesFixture)});await page.getByRole('button',{name:'Import selected students'}).click();await page.getByRole('button',{name:'Settings'}).click();
- await expect(page.getByRole('heading',{name:'Bell Schedule'})).toBeVisible();
- await expect(page.getByLabel('Monday Period 3 class mapping')).toHaveValue(/.+/);
- await page.getByLabel('Monday Period 3 start').fill('10:30');await page.getByRole('button',{name:'Save bell schedule'}).click();await expect(page.getByText('Bell schedule saved.')).toBeVisible();
- page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Restore default bell schedule'}).click();await expect(page.getByLabel('Monday Period 3 start')).toHaveValue('10:25');
+ await expect(page.getByRole('heading',{name:'Switch Class / Period'})).not.toBeVisible();
+ await expect(page.getByRole('heading',{name:'Bell Schedule'})).not.toBeVisible();
+ const schedules=await page.evaluate(async()=>{const request=indexedDB.open('ClassroomBathroomQueue'),database=await new Promise<IDBDatabase>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});return await new Promise<any[]>((resolve,reject)=>{const tx=database.transaction('bellSchedules'),get=tx.objectStore('bellSchedules').getAll();get.onsuccess=()=>resolve(get.result);get.onerror=()=>reject(get.error)})});
+ expect(schedules.length).toBeGreaterThan(0);
 });
