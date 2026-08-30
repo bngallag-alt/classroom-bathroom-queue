@@ -1,23 +1,50 @@
 # Classroom Bathroom Queue
 
-A private, touchscreen-friendly classroom bathroom line. Students can join or leave the line, see their position, start an exact timer, and mark their return. Teachers can manage the roster and queue, review statistics, change time limits, import/export CSV files, and make or restore complete backups.
+A touchscreen-friendly, local-first classroom bathroom line. Students use their existing student number to join or leave the line, start a timestamp-based timer, and mark their return. Teachers use a PIN-protected dashboard to manage the roster and queue, review retained statistics, configure limits and shortcuts, import rosters, and manage exports and backups.
 
-## Privacy and storage
+## Privacy and local storage
 
-Everything is stored locally in this browser's IndexedDB database. There is no backend, cloud database, account, analytics, advertising, or tracking. Clearing Chrome site data, resetting/powerwashing the Chromebook, or changing to a different web address may erase or separate the records. Export a full backup regularly, and store backups securely because they contain student information.
+All application records remain in this browser's IndexedDB database, `ClassroomBathroomQueue`. The application has no backend, cloud database, account, analytics, advertising, telemetry, or external synchronization. The teacher PIN is a local classroom deterrent, not an account or a strong device-security control.
 
-The application does not require a Chromebook administrator, Google Admin Console, managed ChromeOS kiosk mode, or a browser extension. District policy can still restrict websites, downloads, storage, fullscreen, or other browser features.
+Student numbers are normalized as digit strings, preserving leading zeroes, and stored as per-installation protected lookup values: HMAC-SHA-256 values created with a random 256-bit secret held in the same local database. The raw number is not retained after entry or import. Names, classes, recent bathroom history, and queue information are still identifiable local student information; protecting student numbers does not anonymize the database or protect a compromised device/browser profile.
 
-## Run it on this computer
+Detailed completed-session and queue history is retained for a rolling 30 days. Records older than the cutoff are removed at startup, after completion and restore, and before backup or history export. Rosters, classes, settings, schedules, waiting entries, active entries, and active timer timestamps are not part of that purge.
 
-Install current Node.js (version 20 or newer), open PowerShell in this folder, then run:
+Browser storage is tied to the exact deployed origin and browser profile. Clearing site data, using incognito/private mode, changing browser profiles or devices, powerwashing a Chromebook, or changing the site's origin can make the local data unavailable. An application migration cannot repair cleared storage or move data between origins. Keep the exact existing GitHub Pages address for seamless upgrades.
+
+## Existing-installation privacy migration
+
+Version 4 retains the same database name, stores, PWA scope, deployment base, and internal UUID relationships. On the first load at the same origin:
+
+1. The app opens the existing Dexie database and reads every migration store.
+2. It classifies student records as legacy, protected, partial, or invalid and validates current queue and enrollment relationships.
+3. It reuses a valid installation secret or generates one random 256-bit secret, normalizes every legacy student number, derives every HMAC, and checks for invalid or duplicate identifiers before mutation.
+4. In one Dexie transaction it replaces student records with protected lookup fields, removes session ID snapshots, purges expired detailed history, and records schema/privacy version 4 metadata.
+5. Internal student UUIDs, names, classes, enrollments, settings, PIN hash/salt, schedules, limits, bans, queue order, and active `startedAt` timestamps remain unchanged.
+6. A configured teacher sees a one-time privacy-update notice and continues without setup or roster re-import.
+
+The migration is idempotent and coordinated with the browser's same-origin Web Locks API when available. Failure aborts the destructive transaction, leaves source data recoverable, shows a non-destructive error, and offers Retry. It never factory-resets the app.
+
+## Backups, restores, imports, and CSV exports
+
+Version 4 full backups are portable encrypted JSON envelopes. The full payload is encrypted with AES-256-GCM using a key derived from a separate teacher-supplied password with PBKDF2-SHA-256, a random salt, and 310,000 iterations. Only format/version, KDF parameters, salt, IV, and ciphertext appear outside the encrypted payload. The backup password is not the teacher PIN, is not stored by the app, and is required for restore. Store both the encrypted file and its password securely; forgotten passwords cannot be recovered.
+
+Legacy unencrypted version 1, 2, and 3 backups remain importable. The app validates and converts their raw numbers in memory before a single transactional replacement, removes legacy snapshots, enforces retention, and retains the current installation's teacher PIN. A legacy file may contain readable student IDs and should be securely deleted after a successful converted restore.
+
+Aeries TXT and standard CSV imports may hold raw numbers temporarily while parsing a teacher-only preview. Selected numbers are converted to protected lookups before IndexedDB persistence. Routine roster export is name-only because raw numbers cannot be reconstructed. History CSV omits raw numbers, HMAC values, and the installation secret, but it still contains identifiable names and recent history and must be handled accordingly.
+
+## Run and verify locally
+
+Install Node.js 20 or newer, open PowerShell in this folder, and run:
 
 ```powershell
 npm install
 npm run dev
 ```
 
-Open the address Vite prints, usually `http://localhost:5173`. The first screen guides the teacher through PIN and roster setup. To check the project:
+Open the address printed by Vite, usually `http://localhost:5173`. The first screen guides a new installation through PIN and optional roster setup.
+
+Run the complete validation suite with:
 
 ```powershell
 npm run typecheck
@@ -25,40 +52,26 @@ npm run lint
 npm run test
 npm run test:e2e
 npm run build
-npm run preview
 ```
 
-The production site is created in `dist`. `npm run preview` serves that build for a final local check.
+The production output is written to `dist`.
 
-## Chromebook use
+## Chromebook and offline use
 
-Visit the deployed HTTPS address in Chrome. Complete setup, choose **Start Bathroom Kiosk**, and approve ordinary browser fullscreen. Normal browser and operating-system controls—including Escape—can exit fullscreen. The queue and running timer remain intact; the app hides student information until **Return to fullscreen** is pressed.
+Visit the deployed HTTPS address in Chrome. Choose **Start Bathroom Kiosk** and approve ordinary browser fullscreen. Escape and normal browser/operating-system controls can exit fullscreen; the app hides queue information until fullscreen is restored. Queue state and the active timer timestamp remain in IndexedDB and survive an ordinary reload.
 
-Teacher access is intentionally hidden from the student screen. Press **Ctrl+Shift+5**, then enter the teacher PIN. If fullscreen is blocked, click the page first, use the teacher dashboard's fullscreen button, and check Chrome's site permissions. The app never forces fullscreen automatically.
+Teacher access uses the configured keyboard shortcut (initially **Ctrl+Shift+5**) followed by the local PIN. Chrome installation is optional. After one successful online load, the service worker caches the application shell for offline use. New service-worker versions wait for a controlled, teacher-confirmed reload instead of forcing an update while the kiosk is active. Updates do not delete IndexedDB or Cache Storage.
 
-Chrome may offer **Install app** in its menu or address bar. Installation is optional; the hosted site works normally. After one successful online load, the service worker caches the application shell for essential offline use.
+## Static GitHub Pages deployment
 
-## Roster, backup, and exports
-
-In the teacher dashboard:
-
-- Roster CSV files use the exact headings `name,studentId`. IDs stay as text, including leading zeroes. Import shows a complete preview and blocks files with invalid rows. A fictional example is: `Jordan Lee,001482`.
-- **Export full backup** downloads roster, queue, active timer timestamps, history, and non-secret settings as versioned JSON. The current teacher PIN is intentionally retained when restoring.
-- **Restore full backup** validates the file and shows its date and record counts before replacing local data.
-- **Export roster CSV** exports current students only.
-- **Export bathroom history CSV** exports completed and teacher-canceled sessions newest-first.
-
-## Static HTTPS deployment
-
-Any static HTTPS host can serve the `dist` folder; no environment variables or API keys are needed. The app uses relative asset paths, so refreshes work from a project subfolder. To publish with GitHub Pages, push the repository to GitHub, open **Settings → Pages**, choose **GitHub Actions**, and run the included deployment workflow. The workflow builds and publishes `dist`.
-
-App updates should deploy new static files at the same HTTPS address. They do not intentionally erase IndexedDB. Changing the hostname or path can give Chrome a different storage origin, so export a backup before changing deployment addresses.
+The included workflow builds and publishes `dist`. It does not include browser IndexedDB contents, local backup files, or student records. Keep the current repository path and Pages URL unchanged so existing browsers retain access to their same-origin IndexedDB. No environment variables or API keys are required.
 
 ## Troubleshooting
 
-- **Lost records:** confirm you opened the exact same HTTPS address and Chrome profile. Check whether site data was cleared. Restore the newest secure backup if needed.
-- **Storage fails or is blocked:** allow site data for the address, leave private/incognito mode, confirm free disk space, and reload. District browser policy may disable storage.
-- **Fullscreen is lost:** queue information is deliberately hidden. Press **Return to fullscreen**. If denied, check site permissions or use the teacher dashboard.
-- **PIN forgotten:** the welcome screen provides teacher access; a full local reset is the recovery route, but it deletes all records. Restore a backup afterward if available.
+- **Records appear missing:** verify the exact HTTPS address and Chrome profile, then check whether site data was cleared. Restore an encrypted backup if available.
+- **A backup will not open:** confirm the correct backup password. Authentication failure or altered ciphertext leaves live data unchanged.
+- **Storage is blocked:** allow site data, leave incognito/private mode, confirm available disk space, and reload. District policy may restrict storage or downloads.
+- **Fullscreen is lost:** use **Return to fullscreen** and check site permissions if the request is denied.
+- **PIN is forgotten:** factory reset is the local recovery path, but it erases all records. A backup can be restored after creating a new PIN.
 
-Regular backup exports are the only durable protection against cleared browser data, Chromebook replacement, or powerwashing.
+Encrypted backups are the only portable protection against cleared browser data, device replacement, or a changed browser profile. They cannot preserve access if both the file or its password are lost.

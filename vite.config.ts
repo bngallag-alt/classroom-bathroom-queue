@@ -14,7 +14,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       scope: deploymentBase,
       includeAssets: ['icon.svg'],
       manifest: {

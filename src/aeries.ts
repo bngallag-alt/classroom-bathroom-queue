@@ -2,7 +2,7 @@ import Papa from 'papaparse';
 import type {Student} from './types';
 
 export type AeriesClass={key:string;period:string;courseTitle:string;sectionNumber:string;courseId:string;teacher:string;calendar:string;room:string;schoolYear:string;studentCount:number;malformed?:string};
-export type AeriesStudent={studentId:string;rawName:string;grade:string;classKeys:string[];conflictingNames:string[];valid:boolean};
+export type AeriesStudent={studentId:string;externalIdHash?:string;rawName:string;grade:string;classKeys:string[];conflictingNames:string[];valid:boolean};
 export type AeriesParseResult={isAeries:boolean;classes:AeriesClass[];students:AeriesStudent[];warnings:string[]};
 
 const clean=(value:unknown)=>String(value??'').trim();
@@ -22,4 +22,4 @@ export function parseAeriesRoster(text:string):AeriesParseResult{
  finish();return{isAeries:classes.length>0,classes,students:[...students.values()],warnings:[...new Set(warnings)]}
 }
 
-export function aeriesImportStatus(student:AeriesStudent,existing:Student[],displayName:string){const match=existing.find(x=>x.studentId===student.studentId);if(student.conflictingNames.length)return'Duplicate ID has conflicting names';if(match)return match.name===displayName?'Already in roster':'Name differs from existing record';if(student.classKeys.length>1)return'Appears in multiple imported classes';return'New student'}
+export function aeriesImportStatus(student:AeriesStudent,existing:Student[],displayName:string){const match=student.externalIdHash?existing.find(x=>x.externalIdHash===student.externalIdHash):undefined;if(student.conflictingNames.length)return'Duplicate ID has conflicting names';if(match)return match.name===displayName?'Already in roster':'Name differs from existing record';if(student.classKeys.length>1)return'Appears in multiple imported classes';return'New student'}

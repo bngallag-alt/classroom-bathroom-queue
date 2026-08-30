@@ -1,0 +1,7 @@
+export function normalizeExternalId(value:string){const normalized=value.trim();if(!normalized)throw new Error('Student ID is required.');if(!/^\d+$/.test(normalized))throw new Error('Student ID must contain digits only.');return normalized}
+export function bytesToBase64Url(bytes:Uint8Array){let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+export function base64UrlToBytes(value:string){const padded=value.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-value.length%4)%4),binary=atob(padded);return Uint8Array.from(binary,char=>char.charCodeAt(0))}
+export function validLookupSecret(value:unknown){try{return typeof value==='string'&&base64UrlToBytes(value).length===32}catch{return false}}
+export function generateLookupSecret(){const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);return bytesToBase64Url(bytes)}
+export async function deriveExternalIdHash(secret:string,rawId:string){const normalized=normalizeExternalId(rawId),key=await crypto.subtle.importKey('raw',base64UrlToBytes(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']),signature=await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(normalized));return Array.from(new Uint8Array(signature),byte=>byte.toString(16).padStart(2,'0')).join('')}
+export function externalIdLast4(rawId:string){const normalized=normalizeExternalId(rawId);return normalized.slice(-4)}
