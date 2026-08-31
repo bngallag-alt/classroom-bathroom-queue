@@ -15,6 +15,7 @@ import {
 } from './lib';
 import { localAppServices } from './services';
 import AeriesImportPanel from './AeriesImportPanel';
+import AeriesInstructions from './AeriesInstructions';
 
 export default function SetupFlow({
   students,
@@ -170,6 +171,7 @@ export default function SetupFlow({
     <p aria-live="polite"><b>{students.length} student{students.length === 1 ? '' : 's'} currently added</b></p>
     {notice && <p className="privacy" role="status">{notice}</p>}
     <div className="setup-options">
+      <AeriesInstructions />
       <AeriesImportPanel students={students} onChanged={onChanged} onNotice={setNotice} />
       <section className="card">
         <h2>Restore an installation</h2>
