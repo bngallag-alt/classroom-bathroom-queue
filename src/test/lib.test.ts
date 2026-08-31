@@ -6,17 +6,21 @@ import {
   decryptBackup,
   finishActive,
   formatDuration,
+  HOTKEY_OPTIONS,
   historyCsv,
   hotkeyMatches,
   parseRosterCsv,
   purgedHistoryCsv,
   restoreAnyBackup,
   rosterCsv,
+  resolveTeacherHotkeyAfterRestore,
   startTimer,
+  studentIdKeyboardAction,
   studentStats,
   timerLevel,
   useEligibility,
   validateStudent,
+  validateHotkeyPair,
 } from '../lib';
 import {
   deriveExternalIdHash,
@@ -327,5 +331,33 @@ describe('custom keyboard shortcuts', () => {
   it('matches the physical shifted digit', () => {
     const event = { ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, key: '(', code: 'Digit9' };
     expect(hotkeyMatches(event, 'Ctrl+Shift+9')).toBe(true);
+  });
+
+  it('validates, resolves restore conflicts, and persists the shared teacher shortcut setting', async () => {
+    expect(HOTKEY_OPTIONS).toContain('Ctrl+Shift+9');
+    expect(validateHotkeyPair('Ctrl+Shift+9', 'Ctrl+Shift+9')).toMatch(/different/);
+    expect(validateHotkeyPair('Ctrl+Shift+9', 'Ctrl+Shift+6')).toBe('');
+    expect(resolveTeacherHotkeyAfterRestore('Ctrl+Shift+9', 'Ctrl+Shift+5', 'Ctrl+Shift+6')).toBe('Ctrl+Shift+9');
+    expect(resolveTeacherHotkeyAfterRestore('Ctrl+Shift+9', 'Ctrl+Shift+5', 'Ctrl+Shift+9')).toBe('Ctrl+Shift+5');
+    const { localAppServices } = await import('../services');
+    await localAppServices.saveSettings({ ...(await getSettings()), teacherHotkey: 'Ctrl+Shift+9' });
+    expect((await getSettings()).teacherHotkey).toBe('Ctrl+Shift+9');
+  });
+});
+
+describe('Student ID keyboard input', () => {
+  const key = (code: string, value: string, modifiers = {}) => studentIdKeyboardAction({ ctrlKey: false, altKey: false, metaKey: false, code, key: value, ...modifiers });
+
+  it('maps top-row and numpad digits without converting their values to numbers', () => {
+    expect(key('Digit0', '0')).toEqual({ type: 'digit', digit: '0' });
+    expect(key('Numpad9', '9')).toEqual({ type: 'digit', digit: '9' });
+  });
+
+  it('maps editing controls and ignores modifier-based shortcuts', () => {
+    expect(key('Backspace', 'Backspace')).toEqual({ type: 'backspace' });
+    expect(key('Enter', 'Enter')).toEqual({ type: 'submit' });
+    expect(key('Escape', 'Escape')).toEqual({ type: 'clear' });
+    expect(key('Digit5', '%', { ctrlKey: true })).toEqual({ type: 'none' });
+    expect(key('Digit6', '^', { altKey: true })).toEqual({ type: 'none' });
   });
 });
