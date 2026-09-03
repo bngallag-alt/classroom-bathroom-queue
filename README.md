@@ -1,6 +1,6 @@
 # Classroom Bathroom Queue
 
-A touchscreen-friendly, local-first classroom bathroom line. Students use their existing student number to join or leave the line, start a timestamp-based timer, and mark their return. Teachers use a PIN-protected dashboard to manage the roster and queue, review retained statistics, configure limits and shortcuts, import rosters, and manage exports and backups.
+A touchscreen-friendly, local-first classroom bathroom line. Students use their existing student number to join or leave the line, start a timestamp-based timer, and mark their return. Teachers use a PIN-protected dashboard to manage the roster and queue, review retained statistics, configure usage, weekly-time and probation limits, manage temporary pass suspensions, customize shortcuts, import rosters, and manage exports and backups.
 
 ## Privacy and local storage
 
@@ -9,6 +9,8 @@ All application records remain in this browser's IndexedDB database, `ClassroomB
 Student numbers are normalized as digit strings, preserving leading zeroes, and stored as per-installation protected lookup values: HMAC-SHA-256 values created with a random 256-bit secret held in the same local database. The raw number is not retained after entry or import. Names, classes, recent bathroom history, and queue information are still identifiable local student information; protecting student numbers does not anonymize the database or protect a compromised device/browser profile.
 
 Detailed completed-session and queue history is retained for a rolling 30 days. Records older than the cutoff are removed at startup, after completion and restore, and before backup or history export. Rosters, classes, settings, schedules, waiting entries, active entries, and active timer timestamps are not part of that purge.
+
+Weekly bathroom-time usage is derived from counted completed sessions within a teacher-selected local calendar week; no separate running counter is stored. Weekly limits, overtime-count warnings, and automatic suspensions are disabled by default. Teachers can configure individual weekly allowances or unlimited time and can apply, adjust, or end temporary suspensions with PIN confirmation. These controls affect only the app's pass workflow and are not a substitute for emergency or accommodation access.
 
 Browser storage is tied to the exact deployed origin and browser profile. Clearing site data, using incognito/private mode, changing browser profiles or devices, powerwashing a Chromebook, or changing the site's origin can make the local data unavailable. An application migration cannot repair cleared storage or move data between origins. Keep the exact existing GitHub Pages address for seamless upgrades.
 
@@ -27,7 +29,7 @@ The migration is idempotent and coordinated with the browser's same-origin Web L
 
 ## Backups, restores, imports, and CSV exports
 
-Version 4 full backups are portable encrypted JSON envelopes. The full payload is encrypted with AES-256-GCM using a key derived from a separate teacher-supplied password with PBKDF2-SHA-256, a random salt, and 310,000 iterations. Only format/version, KDF parameters, salt, IV, and ciphertext appear outside the encrypted payload. The backup password is not the teacher PIN, is not stored by the app, and is required for restore. Store both the encrypted file and its password securely; forgotten passwords cannot be recovered.
+Version 4 full backups are portable encrypted JSON envelopes. The full payload—including weekly policies, individual overrides, probation settings, and temporary suspension state—is encrypted with AES-256-GCM using a key derived from a separate teacher-supplied password with PBKDF2-SHA-256, a random salt, and 310,000 iterations. Only format/version, KDF parameters, salt, IV, and ciphertext appear outside the encrypted payload. The backup password is not the teacher PIN, is not stored by the app, and is required for restore. Store both the encrypted file and its password securely; forgotten passwords cannot be recovered.
 
 Legacy unencrypted version 1, 2, and 3 backups remain importable. The app validates and converts their raw numbers in memory before a single transactional replacement, removes legacy snapshots, enforces retention, and retains the current installation's teacher PIN. A legacy file may contain readable student IDs and should be securely deleted after a successful converted restore.
 

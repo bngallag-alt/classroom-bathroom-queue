@@ -16,6 +16,7 @@ import {
 import { localAppServices } from './services';
 import AeriesImportPanel from './AeriesImportPanel';
 import AeriesInstructions from './AeriesInstructions';
+import { CURRENT_RELEASE_ID } from './release';
 
 export default function SetupFlow({
   students,
@@ -68,7 +69,7 @@ export default function SetupFlow({
 
   async function finish() {
     if (!pinSettings) return;
-    await localAppServices.saveSettings({ ...pinSettings, setupComplete: true });
+    await localAppServices.saveSettings({ ...pinSettings, setupComplete: true, lastSeenReleaseId: CURRENT_RELEASE_ID });
     await onDone();
   }
 
@@ -119,7 +120,7 @@ export default function SetupFlow({
       const result = await restoreAnyBackup(backup, pinSettings, backup.format === 'classroom-bathroom-queue-encrypted' ? backupPassword : undefined);
       const restoredSettings = await getSettings();
       const preservedHotkey = resolveTeacherHotkeyAfterRestore(teacherHotkey, restoredSettings.teacherHotkey, restoredSettings.clearQueueHotkey);
-      await localAppServices.saveSettings({ ...restoredSettings, teacherHotkey: preservedHotkey, setupComplete: true });
+      await localAppServices.saveSettings({ ...restoredSettings, teacherHotkey: preservedHotkey, setupComplete: true, lastSeenReleaseId: CURRENT_RELEASE_ID });
       setBackup(undefined);
       setBackupPassword('');
       if (restore.current) restore.current.value = '';
