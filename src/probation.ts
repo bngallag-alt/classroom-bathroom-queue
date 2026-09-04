@@ -141,7 +141,6 @@ export function activePassSuspension(student: Student, settings: Settings, at = 
   const suspension = student.passSuspension;
   if (!suspension || new Date(suspension.endsAt).getTime() <= at.getTime()) return undefined;
   if (suspension.kind === 'automatic' && suspension.source !== 'weekly-time' && (student.probationExempt || !settings.probationPolicy.automaticSuspensionsEnabled)) return undefined;
-  if (suspension.kind === 'automatic' && suspension.source === 'weekly-time' && (!settings.weeklyTimePolicy.enabled || !settings.weeklyTimePolicy.automaticSuspensionEnabled || student.weeklyTimeLimitMinutes === 0)) return undefined;
   return suspension;
 }
 

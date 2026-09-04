@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { atomicReplace, db, defaults, getSettings, normalizeSettings } from '../db';
 import { createEncryptedBackup, decryptBackup, restoreAnyBackup, useEligibility } from '../lib';
-import { normalizeProbationPolicy, reconcileStudentProbation } from '../probation';
+import { activePassSuspension, normalizeProbationPolicy } from '../probation';
 import { base64UrlToBytes, bytesToBase64Url, generateLookupSecret } from '../privacy';
 import { localAppServices } from '../services';
 import type { EncryptedBackupV4, Session, Settings, Student, Weekday, WeeklyTimePolicy } from '../types';
@@ -11,6 +11,7 @@ import {
   effectiveWeeklyAllowance,
   formatWeeklyDuration,
   normalizeWeeklyTimePolicy,
+  previousWeekOvertimeDeduction,
   reconcileStudentWeeklyTime,
   schoolWeek,
   validateWeeklyTimePolicy,
@@ -60,6 +61,11 @@ function completed(id: string, endedAt: Date, durationSeconds: number, changes: 
   };
 }
 
+function previousWeekCompleted(id: string, durationSeconds: number, settings: Settings, changes: Partial<Session> = {}) {
+  const { start } = schoolWeek(at, settings.weeklyTimePolicy.resetDay);
+  return completed(id, new Date(start.getTime() - 1_000), durationSeconds, changes);
+}
+
 beforeEach(async () => {
   await db.delete();
   await db.open();
@@ -91,13 +97,12 @@ describe('school-week boundaries', () => {
 
 describe('weekly duration calculations and eligibility', () => {
   it('starts disabled and validates every weekly setting', () => {
-    expect(defaultWeeklyTimePolicy).toMatchObject({ enabled: false, allowanceMinutes: 20, resetDay: 1, warningRemainingMinutes: 5, automaticSuspensionEnabled: false, overageGraceMinutes: 1, suspensionDays: 7 });
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ allowanceMinutes: 0 }), true)).toMatch(/positive whole number/);
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ warningRemainingMinutes: -1 }), true)).toMatch(/zero or more/);
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ overageGraceMinutes: -1 }), true)).toMatch(/nonnegative/);
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ suspensionDays: 31 }), true)).toMatch(/1 through 30/);
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ enabled: false, automaticSuspensionEnabled: true }), true)).toMatch(/Enable the weekly/);
-    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ enabled: true, automaticSuspensionEnabled: true }), false)).toMatch(/Acknowledge/);
+    expect(defaultWeeklyTimePolicy).toMatchObject({ enabled: false, allowanceMinutes: 20, resetDay: 1, warningRemainingMinutes: 5, deductOvertimeNextWeek: false, overtimeGraceMinutes: 0, automaticSuspensionEnabled: false });
+    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ allowanceMinutes: 0 }))).toMatch(/positive whole number/);
+    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ warningRemainingMinutes: -1 }))).toMatch(/zero or more/);
+    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ overtimeGraceMinutes: -1 }))).toMatch(/Grace period/);
+    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ overtimeGraceMinutes: 1.5 }))).toMatch(/whole number/);
+    expect(validateWeeklyTimePolicy(normalizeWeeklyTimePolicy({ deductOvertimeNextWeek: true, overtimeGraceMinutes: 2 }))).toBe('');
   });
 
   it('counts exact completed duration and excludes canceled, unstarted, old, and future sessions', () => {
@@ -174,60 +179,78 @@ describe('weekly duration calculations and eligibility', () => {
   });
 });
 
-describe('weekly automatic suspensions', () => {
-  const automatic = { automaticSuspensionEnabled: true, overageGraceMinutes: 1, suspensionDays: 1 };
+describe('next-week overtime deductions', () => {
+  const deductionPolicy = { deductOvertimeNextWeek: true, overtimeGraceMinutes: 0 };
 
-  it('compares the overage in exact seconds', () => {
-    const { settings } = configured(automatic);
-    expect(assessWeeklyTime(student, [completed('under', new Date(at.getTime() - 1_000), 1_259)], settings, at).automaticSuspensionTriggered).toBe(false);
-    expect(assessWeeklyTime(student, [completed('at', new Date(at.getTime() - 1_000), 1_260)], settings, at).automaticSuspensionTriggered).toBe(true);
+  it('does not deduct overtime when the feature is disabled', () => {
+    const { settings } = configured({ deductOvertimeNextWeek: false });
+    const previous = previousWeekCompleted('disabled-overtime', 1_380, settings);
+    expect(previousWeekOvertimeDeduction(student, [previous], settings, at).deductionSeconds).toBe(0);
+    expect(assessWeeklyTime(student, [previous], settings, at)).toMatchObject({ baseAllowanceSeconds: 1_200, allowanceSeconds: 1_200, deductionSeconds: 0 });
   });
 
-  it('creates one source-specific suspension and does not reuse identical history after expiry', () => {
-    const { settings } = configured(automatic);
-    const records = [completed('overage', new Date(at.getTime() - 1_000), 1_275)];
-    const suspended = reconcileStudentWeeklyTime(student, records, settings, at);
-    expect(suspended.passSuspension).toMatchObject({ kind: 'automatic', source: 'weekly-time', reasons: ['Weekly bathroom-time allowance exceeded by 1 minute 15 seconds.'] });
-    expect(suspended.lastWeeklyTimeSuspensionTriggerKey).toContain('overage');
-    const afterExpiry = new Date(at.getTime() + 2 * 86_400_000);
-    const unchanged = reconcileStudentWeeklyTime(suspended, records, settings, afterExpiry);
-    expect(unchanged.passSuspension?.startedAt).toBe(suspended.passSuspension?.startedAt);
-    const newRelevantSession = completed('new-overage-use', new Date(afterExpiry.getTime() - 1_000), 60);
-    const newlySuspended = reconcileStudentWeeklyTime(suspended, [...records, newRelevantSession], settings, afterExpiry);
-    expect(newlySuspended.passSuspension?.startedAt).toBe(afterExpiry.toISOString());
-    const rearmed = reconcileStudentWeeklyTime({ ...suspended, lastWeeklyTimeSuspensionTriggerKey: undefined }, records, settings, afterExpiry, true);
-    expect(rearmed.passSuspension?.startedAt).toBe(afterExpiry.toISOString());
+  it('deducts exact previous-week overtime when grace is zero', () => {
+    const { settings } = configured(deductionPolicy);
+    const previous = previousWeekCompleted('three-over', 1_380, settings);
+    expect(previousWeekOvertimeDeduction(student, [previous], settings, at)).toMatchObject({ previousUsedSeconds: 1_380, previousAllowanceSeconds: 1_200, overtimeSeconds: 180, graceSeconds: 0, deductionSeconds: 180 });
+    expect(assessWeeklyTime(student, [previous], settings, at)).toMatchObject({ baseAllowanceSeconds: 1_200, allowanceSeconds: 1_020, remainingSeconds: 1_020, deductionSeconds: 180, blocked: false });
   });
 
-  it('keeps weekly and rolling trigger tracking independent', () => {
-    const { settings } = configured(automatic);
-    const withRollingKey = { ...student, lastAutoSuspensionTriggerKey: 'rolling-existing' };
-    const weekly = reconcileStudentWeeklyTime(withRollingKey, [completed('overage', new Date(at.getTime() - 1_000), 1_260)], settings, at);
-    expect(weekly.lastAutoSuspensionTriggerKey).toBe('rolling-existing');
-    expect(weekly.lastWeeklyTimeSuspensionTriggerKey).toContain('overage');
-    expect(reconcileStudentProbation(weekly, [], settings, at)).toMatchObject({ lastAutoSuspensionTriggerKey: 'rolling-existing', lastWeeklyTimeSuspensionTriggerKey: weekly.lastWeeklyTimeSuspensionTriggerKey });
+  it('forgives overtime within grace and deducts only the excess', () => {
+    const { settings } = configured({ ...deductionPolicy, overtimeGraceMinutes: 2 });
+    const threeOver = previousWeekCompleted('three-over-grace', 1_380, settings);
+    const atBoundary = previousWeekCompleted('at-grace', 1_320, settings);
+    expect(assessWeeklyTime(student, [threeOver], settings, at).deductionSeconds).toBe(60);
+    expect(assessWeeklyTime(student, [atBoundary], settings, at).deductionSeconds).toBe(0);
+    expect(assessWeeklyTime(student, [previousWeekCompleted('below-grace', 1_319, settings)], settings, at).deductionSeconds).toBe(0);
   });
 
-  it('keeps the rolling-probation exemption separate from weekly enforcement', () => {
-    const { settings } = configured(automatic);
-    const exemptFromRolling = { ...student, probationExempt: true };
-    const result = reconcileStudentWeeklyTime(exemptFromRolling, [completed('weekly-overage', new Date(at.getTime() - 1_000), 1_260)], settings, at);
-    expect(result.passSuspension).toMatchObject({ source: 'weekly-time' });
+  it('never lowers the effective allowance below zero and blocks at zero', async () => {
+    const { settings } = configured(deductionPolicy);
+    const previous = previousWeekCompleted('far-over', 3_000, settings);
+    const assessment = assessWeeklyTime(student, [previous], settings, at);
+    expect(assessment).toMatchObject({ allowanceSeconds: 0, remainingSeconds: 0, deductionSeconds: 1_200, blocked: true });
+    await expect(useEligibility(student, settings, [previous], at, 'bathroom')).resolves.toMatchObject({ allowed: false, reason: expect.stringContaining('weekly bathroom-time allowance') });
   });
 
-  it('keeps permanent bans and manual temporary suspensions independent', async () => {
-    const { settings } = configured(automatic);
-    await expect(useEligibility({ ...student, banned: true }, settings, [], at)).resolves.toMatchObject({ allowed: false, reason: expect.stringContaining('not available') });
-    const manual = { ...student, passSuspension: { kind: 'manual' as const, source: 'manual' as const, startedAt: at.toISOString(), endsAt: new Date(at.getTime() + 86_400_000).toISOString(), reasons: ['Teacher-applied temporary suspension'] } };
-    await expect(useEligibility(manual, settings, [], at)).resolves.toMatchObject({ allowed: false, reason: expect.stringContaining('temporarily suspended') });
+  it('uses only the immediately previous week and excludes canceled sessions', () => {
+    const { settings } = configured(deductionPolicy);
+    const { start } = schoolWeek(at, settings.weeklyTimePolicy.resetDay);
+    const twoWeeksOld = completed('two-weeks-old', new Date(start.getFullYear(), start.getMonth(), start.getDate() - 7, 0, 0, 0, -1), 1_800);
+    const canceled = previousWeekCompleted('canceled-overtime', 1_800, settings, { status: 'teacher-canceled' });
+    expect(assessWeeklyTime(student, [twoWeeksOld, canceled], settings, at).deductionSeconds).toBe(0);
   });
 
-  it('keeps an active weekly suspension when the teacher changes usage modes', () => {
-    const { settings } = configured(automatic);
-    const records = [completed('mode-switch-overage', new Date(at.getTime() - 1_000), 1_260)];
-    const suspended = reconcileStudentWeeklyTime(student, records, settings, at);
-    const afterSwitch = reconcileStudentWeeklyTime(suspended, records, { ...settings, usageLimitMode: 'bathroom-passes' }, at);
-    expect(afterSwitch.passSuspension).toEqual(suspended.passSuspension);
+  it('supports individual allowances and exempts unlimited students', () => {
+    const { settings } = configured(deductionPolicy);
+    const overridden = { ...student, weeklyTimeLimitMinutes: 10 };
+    const previous = previousWeekCompleted('override-over', 720, settings);
+    expect(assessWeeklyTime(overridden, [previous], settings, at)).toMatchObject({ baseAllowanceSeconds: 600, allowanceSeconds: 480, deductionSeconds: 120 });
+    expect(assessWeeklyTime({ ...student, weeklyTimeLimitMinutes: 0 }, [previous], settings, at)).toMatchObject({ mode: 'unlimited', allowanceSeconds: undefined, deductionSeconds: 0, blocked: false });
+  });
+
+  it('uses the reduced allowance for warnings and eligibility only in weekly mode', async () => {
+    const { settings } = configured({ ...deductionPolicy, warningRemainingMinutes: 8 });
+    const previous = previousWeekCompleted('three-over-for-warning', 1_380, settings);
+    const current = completed('current-nine', new Date(at.getTime() - 1_000), 540);
+    expect(weeklyTimeWarningMessage(student, [previous, current], settings, at)).toBe('You have 8 minutes of bathroom time remaining this week.');
+    const exhausted = completed('current-seventeen', new Date(at.getTime() - 1_000), 1_020);
+    await expect(useEligibility(student, settings, [previous, exhausted], at, 'bathroom')).resolves.toMatchObject({ allowed: false });
+    const bathroomMode = { ...settings, usageLimitMode: 'bathroom-passes' as const };
+    expect(assessWeeklyTime(student, [previous], bathroomMode, at)).toMatchObject({ mode: 'disabled', deductionSeconds: 0, allowanceSeconds: undefined, blocked: false });
+    expect(weeklyTimeWarningMessage(student, [previous, current], bathroomMode, at)).toBe('');
+  });
+
+  it('never creates a new weekly suspension and preserves an existing active one', async () => {
+    const { settings } = configured({ ...deductionPolicy, automaticSuspensionEnabled: true });
+    const currentOvertime = completed('legacy-trigger-attempt', new Date(at.getTime() - 1_000), 1_800);
+    expect(assessWeeklyTime(student, [currentOvertime], settings, at).automaticSuspensionTriggered).toBe(false);
+    expect(reconcileStudentWeeklyTime(student, [currentOvertime], settings, at)).toEqual(student);
+    const legacySuspended = { ...student, passSuspension: { kind: 'automatic' as const, source: 'weekly-time' as const, startedAt: at.toISOString(), endsAt: new Date(at.getTime() + 86_400_000).toISOString(), reasons: ['Legacy weekly suspension'] } };
+    const retiredSettings = { ...settings, usageLimitMode: 'bathroom-passes' as const, weeklyTimePolicy: { ...settings.weeklyTimePolicy, enabled: false, automaticSuspensionEnabled: false } };
+    expect(reconcileStudentWeeklyTime(legacySuspended, [], retiredSettings, at)).toEqual(legacySuspended);
+    expect(activePassSuspension(legacySuspended, retiredSettings, at)).toEqual(legacySuspended.passSuspension);
+    await expect(useEligibility(legacySuspended, retiredSettings, [], at)).resolves.toMatchObject({ allowed: false, reason: expect.stringContaining('temporarily suspended') });
   });
 });
 
@@ -242,32 +265,34 @@ describe('weekly compatibility and encrypted backups', () => {
   });
 
   it('switches one canonical mode while preserving both configurations', async () => {
-    const { settings } = configured({ allowanceMinutes: 24, warningRemainingMinutes: 6, automaticSuspensionEnabled: false });
+    const { settings } = configured({ allowanceMinutes: 24, warningRemainingMinutes: 6, deductOvertimeNextWeek: true, overtimeGraceMinutes: 3 });
     const configuredSettings = { ...settings, globalUseLimit: 4, warningSeconds: 240, overLimitSeconds: 360 };
     await atomicReplace({ students: [student], queue: [], sessions: [], settings: configuredSettings });
     await localAppServices.saveUsageLimitMode('bathroom-passes');
-    await expect(getSettings()).resolves.toMatchObject({ usageLimitMode: 'bathroom-passes', globalUseLimit: 4, warningSeconds: 240, overLimitSeconds: 360, weeklyTimePolicy: { enabled: true, allowanceMinutes: 24, warningRemainingMinutes: 6 } });
+    await expect(getSettings()).resolves.toMatchObject({ usageLimitMode: 'bathroom-passes', globalUseLimit: 4, warningSeconds: 240, overLimitSeconds: 360, weeklyTimePolicy: { enabled: true, allowanceMinutes: 24, warningRemainingMinutes: 6, deductOvertimeNextWeek: true, overtimeGraceMinutes: 3 } });
     await localAppServices.saveUsageLimitMode('weekly-time');
-    await expect(getSettings()).resolves.toMatchObject({ usageLimitMode: 'weekly-time', globalUseLimit: 4, warningSeconds: 240, overLimitSeconds: 360, weeklyTimePolicy: { enabled: true, allowanceMinutes: 24, warningRemainingMinutes: 6 } });
+    await expect(getSettings()).resolves.toMatchObject({ usageLimitMode: 'weekly-time', globalUseLimit: 4, warningSeconds: 240, overLimitSeconds: 360, weeklyTimePolicy: { enabled: true, allowanceMinutes: 24, warningRemainingMinutes: 6, deductOvertimeNextWeek: true, overtimeGraceMinutes: 3 } });
   });
 
   it('normalizes old schema-v4 settings to disabled weekly defaults', async () => {
     const old = { ...defaults, lookupSecret: generateLookupSecret() } as Partial<Settings>;
     delete old.weeklyTimePolicy;
     await db.settings.put(old as Settings);
-    await expect(getSettings()).resolves.toMatchObject({ schemaVersion: 4, weeklyTimePolicy: { enabled: false, automaticSuspensionEnabled: false, allowanceMinutes: 20 } });
+    await expect(getSettings()).resolves.toMatchObject({ schemaVersion: 4, weeklyTimePolicy: { enabled: false, deductOvertimeNextWeek: false, overtimeGraceMinutes: 0, automaticSuspensionEnabled: false, allowanceMinutes: 20 } });
   });
 
   it('round-trips weekly policy, override, and suspension state through an encrypted backup', async () => {
-    const { settings } = configured({ automaticSuspensionEnabled: true, overageGraceMinutes: 1 });
-    const overridden = { ...student, weeklyTimeLimitMinutes: 10 };
-    const suspended = reconcileStudentWeeklyTime(overridden, [completed('overage', new Date(at.getTime() - 1_000), 660)], settings, at);
-    await atomicReplace({ students: [suspended], queue: [], sessions: [], settings });
+    const { settings } = configured({ deductOvertimeNextWeek: true, overtimeGraceMinutes: 2, automaticSuspensionEnabled: true });
+    const suspended = { ...student, weeklyTimeLimitMinutes: 10, passSuspension: { kind: 'automatic' as const, source: 'weekly-time' as const, startedAt: at.toISOString(), endsAt: new Date(at.getTime() + 86_400_000).toISOString(), reasons: ['Legacy weekly suspension'] } };
+    const previous = previousWeekCompleted('backup-overage', 780, settings);
+    await atomicReplace({ students: [suspended], queue: [], sessions: [previous], settings });
     const backup = await createEncryptedBackup('correct horse battery');
     await atomicReplace({ students: [], queue: [], sessions: [], settings: { ...defaults, lookupSecret: generateLookupSecret() } });
     await restoreAnyBackup(backup, await getSettings(), 'correct horse battery');
-    expect(await getSettings()).toMatchObject({ usageLimitMode: 'weekly-time', weeklyTimePolicy: { enabled: true, automaticSuspensionEnabled: true } });
-    expect(await db.students.get(student.id)).toMatchObject({ weeklyTimeLimitMinutes: 10, passSuspension: { source: 'weekly-time' }, lastWeeklyTimeSuspensionTriggerKey: expect.any(String) });
+    const restoredSettings = await getSettings();
+    expect(restoredSettings).toMatchObject({ usageLimitMode: 'weekly-time', weeklyTimePolicy: { enabled: true, deductOvertimeNextWeek: true, overtimeGraceMinutes: 2, automaticSuspensionEnabled: true } });
+    expect(await db.students.get(student.id)).toMatchObject({ weeklyTimeLimitMinutes: 10, passSuspension: { source: 'weekly-time' } });
+    expect(assessWeeklyTime(suspended, await db.sessions.toArray(), restoredSettings, at)).toMatchObject({ baseAllowanceSeconds: 600, deductionSeconds: 60, allowanceSeconds: 540 });
   });
 
   it('restores an older encrypted v4 backup with no weekly fields using disabled defaults', async () => {
@@ -283,7 +308,19 @@ describe('weekly compatibility and encrypted backups', () => {
     }
     const oldBackup = await encryptPayload(backup, payload, 'correct horse battery');
     await restoreAnyBackup(oldBackup, await getSettings(), 'correct horse battery');
-    expect(await getSettings()).toMatchObject({ usageLimitMode: 'bathroom-passes', weeklyTimePolicy: { enabled: false, automaticSuspensionEnabled: false, warningRemainingMinutes: 5 } });
+    expect(await getSettings()).toMatchObject({ usageLimitMode: 'bathroom-passes', weeklyTimePolicy: { enabled: false, deductOvertimeNextWeek: false, overtimeGraceMinutes: 0, automaticSuspensionEnabled: false, warningRemainingMinutes: 5 } });
+  });
+
+  it('restores an older encrypted v4 backup without overtime-deduction fields', async () => {
+    const { settings } = configured({ allowanceMinutes: 22, deductOvertimeNextWeek: true, overtimeGraceMinutes: 3 });
+    await atomicReplace({ students: [student], queue: [], sessions: [], settings });
+    const backup = await createEncryptedBackup('correct horse battery');
+    const payload = await decryptBackup(backup, 'correct horse battery');
+    delete (payload.data.settings.weeklyTimePolicy as Partial<WeeklyTimePolicy>).deductOvertimeNextWeek;
+    delete (payload.data.settings.weeklyTimePolicy as Partial<WeeklyTimePolicy>).overtimeGraceMinutes;
+    const oldBackup = await encryptPayload(backup, payload, 'correct horse battery');
+    await restoreAnyBackup(oldBackup, await getSettings(), 'correct horse battery');
+    expect(await getSettings()).toMatchObject({ usageLimitMode: 'weekly-time', weeklyTimePolicy: { enabled: true, allowanceMinutes: 22, deductOvertimeNextWeek: false, overtimeGraceMinutes: 0 } });
   });
 
   it('restores an older encrypted backup without a mode using its weekly enabled state', async () => {

@@ -13,18 +13,16 @@ export default function WeeklyTimeSettings({
   notice: (message: string) => void;
 }) {
   const [policy, setPolicy] = useState(() => normalizeWeeklyTimePolicy(settings.weeklyTimePolicy));
-  const [acknowledged, setAcknowledged] = useState(settings.probationPolicy.automaticSuspensionAcknowledged);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const effectiveAcknowledgement = acknowledged || settings.probationPolicy.automaticSuspensionAcknowledged;
 
   async function save() {
     const nextPolicy = { ...policy, enabled: true };
-    const validation = validateWeeklyTimePolicy(nextPolicy, effectiveAcknowledgement);
+    const validation = validateWeeklyTimePolicy(nextPolicy);
     if (validation) return setError(validation);
     setSaving(true);
     try {
-      await localAppServices.saveWeeklyTimePolicy(nextPolicy, effectiveAcknowledgement);
+      await localAppServices.saveWeeklyTimePolicy(nextPolicy);
       await changed();
       setError('');
       notice('Weekly bathroom-time settings saved.');
@@ -47,17 +45,9 @@ export default function WeeklyTimeSettings({
     <details className="advanced-disclosure weekly-time-advanced">
       <summary>Advanced</summary>
       <div className="advanced-content">
-        <p>Optional automatic suspension rules apply after a student exceeds the weekly allowance by the configured amount.</p>
-        <label className="check-label"><input type="checkbox" checked={policy.automaticSuspensionEnabled} onChange={(event) => { setPolicy({ ...policy, automaticSuspensionEnabled: event.target.checked }); setError(''); }} /> Automatically suspend pass if student exceeds weekly limit</label>
-        <div className="grid2">
-          <label>Minutes over before suspension<input type="number" min="0" step="1" value={policy.overageGraceMinutes} onChange={(event) => { setPolicy({ ...policy, overageGraceMinutes: Number(event.target.value) }); setError(''); }} /></label>
-          <label>Suspension duration (days)<input type="number" min="1" max="30" step="1" value={policy.suspensionDays} onChange={(event) => { setPolicy({ ...policy, suspensionDays: Number(event.target.value) }); setError(''); }} /></label>
-        </div>
-        {policy.automaticSuspensionEnabled && !settings.probationPolicy.automaticSuspensionAcknowledged && <div className="privacy">
-          <p><b>Teacher acknowledgement required</b></p>
-          <p>Automatic suspensions control this app’s pass only. Immediate overrides must remain available for emergencies and accommodations.</p>
-          <label className="check-label"><input type="checkbox" checked={acknowledged} onChange={(event) => { setAcknowledged(event.target.checked); setError(''); }} /> I understand and will provide emergency and accommodation overrides.</label>
-        </div>}
+        <p>Optionally deduct last week’s overtime from this week’s allowance. Only overtime beyond the grace period is deducted.</p>
+        <label className="check-label"><input type="checkbox" checked={policy.deductOvertimeNextWeek} onChange={(event) => { setPolicy({ ...policy, deductOvertimeNextWeek: event.target.checked }); setError(''); }} /> Additional overtime minutes taken from student allowance next week</label>
+        {policy.deductOvertimeNextWeek && <label>Grace period (minutes)<input type="number" min="0" step="1" value={policy.overtimeGraceMinutes} onChange={(event) => { setPolicy({ ...policy, overtimeGraceMinutes: Number(event.target.value) }); setError(''); }} /><small>Overtime within this grace period will not be deducted from the following week.</small></label>}
       </div>
     </details>
     {error && <p className="error" role="alert">{error}</p>}

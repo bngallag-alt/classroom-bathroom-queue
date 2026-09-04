@@ -1,7 +1,5 @@
 import type { Session, Settings, Student, Weekday, WeeklyTimePolicy } from './types';
 
-const DAY_MS = 86_400_000;
-
 export const weekdayOptions: Array<{ value: Weekday; label: string }> = [
   { value: 1, label: 'Monday' },
   { value: 2, label: 'Tuesday' },
@@ -17,6 +15,9 @@ export const defaultWeeklyTimePolicy: WeeklyTimePolicy = {
   allowanceMinutes: 20,
   resetDay: 1,
   warningRemainingMinutes: 5,
+  deductOvertimeNextWeek: false,
+  overtimeGraceMinutes: 0,
+  // Retained only so older settings and backups remain readable.
   automaticSuspensionEnabled: false,
   overageGraceMinutes: 1,
   suspensionDays: 7,
@@ -26,16 +27,16 @@ export function normalizeWeeklyTimePolicy(value?: Partial<WeeklyTimePolicy>): We
   return { ...defaultWeeklyTimePolicy, ...value };
 }
 
-export function validateWeeklyTimePolicy(input: WeeklyTimePolicy, automaticSuspensionAcknowledged: boolean) {
+export function validateWeeklyTimePolicy(input: WeeklyTimePolicy) {
   const policy = normalizeWeeklyTimePolicy(input);
-  if (typeof policy.enabled !== 'boolean' || typeof policy.automaticSuspensionEnabled !== 'boolean') return 'Weekly bathroom-time switches are invalid.';
+  if (typeof policy.enabled !== 'boolean' || typeof policy.deductOvertimeNextWeek !== 'boolean' || typeof policy.automaticSuspensionEnabled !== 'boolean') return 'Weekly bathroom-time switches are invalid.';
   if (!Number.isInteger(policy.allowanceMinutes) || policy.allowanceMinutes < 1) return 'Weekly allowance must be a positive whole number of minutes.';
   if (!weekdayOptions.some((option) => option.value === policy.resetDay)) return 'Select a valid weekly reset day.';
   if (!Number.isInteger(policy.warningRemainingMinutes) || policy.warningRemainingMinutes < 0) return 'The weekly warning must be a whole number of zero or more minutes.';
-  if (!Number.isInteger(policy.overageGraceMinutes) || policy.overageGraceMinutes < 0) return 'Minutes over before suspension must be a nonnegative whole number.';
-  if (!Number.isInteger(policy.suspensionDays) || policy.suspensionDays < 1 || policy.suspensionDays > 30) return 'Suspension duration must be a whole number from 1 through 30 days.';
-  if (policy.automaticSuspensionEnabled && !policy.enabled) return 'Enable the weekly bathroom-time allowance before enabling automatic weekly suspensions.';
-  if (policy.automaticSuspensionEnabled && !automaticSuspensionAcknowledged) return 'Acknowledge the emergency and accommodation override requirement before enabling automatic weekly suspensions.';
+  if (!Number.isInteger(policy.overtimeGraceMinutes) || policy.overtimeGraceMinutes < 0) return 'Grace period must be a whole number of zero or more minutes.';
+  // Deprecated fields are still validated because current encrypted backups may contain them.
+  if (!Number.isInteger(policy.overageGraceMinutes) || policy.overageGraceMinutes < 0) return 'Legacy weekly overage must be a nonnegative whole number of minutes.';
+  if (!Number.isInteger(policy.suspensionDays) || policy.suspensionDays < 1 || policy.suspensionDays > 30) return 'Legacy weekly suspension duration must be a whole number from 1 through 30 days.';
   return '';
 }
 
@@ -47,10 +48,7 @@ export function schoolWeek(at = new Date(), resetDay: Weekday = 1) {
   return { start, end };
 }
 
-export function weeklyCountedSessions(studentId: string, sessions: Session[], settings: Settings, at = new Date()) {
-  const policy = normalizeWeeklyTimePolicy(settings.weeklyTimePolicy);
-  const { start, end } = schoolWeek(at, policy.resetDay);
-  const nowTime = at.getTime();
+function countedSessionsWithin(studentId: string, sessions: Session[], settings: Settings, start: Date, end: Date, notAfter: Date) {
   return sessions.filter((session) => {
     const ended = new Date(session.endedAt).getTime();
     const started = new Date(session.startedAt).getTime();
@@ -61,9 +59,15 @@ export function weeklyCountedSessions(studentId: string, sessions: Session[], se
       && started <= ended
       && ended >= start.getTime()
       && ended < end.getTime()
-      && ended <= nowTime
+      && ended <= notAfter.getTime()
       && (settings.countWaterAsBathroom || (session.passType ?? 'bathroom') === 'bathroom');
   });
+}
+
+export function weeklyCountedSessions(studentId: string, sessions: Session[], settings: Settings, at = new Date()) {
+  const policy = normalizeWeeklyTimePolicy(settings.weeklyTimePolicy);
+  const { start, end } = schoolWeek(at, policy.resetDay);
+  return countedSessionsWithin(studentId, sessions, settings, start, end, at);
 }
 
 export type WeeklyAllowanceMode = 'disabled' | 'inherited' | 'override' | 'unlimited';
@@ -78,9 +82,39 @@ export function effectiveWeeklyAllowance(student: Student, settings: Settings) {
   return { mode: 'inherited' as WeeklyAllowanceMode, allowanceSeconds: policy.allowanceMinutes * 60 };
 }
 
+export type WeeklyOvertimeDeduction = {
+  previousWeekStart: Date;
+  previousWeekEnd: Date;
+  previousUsedSeconds: number;
+  previousAllowanceSeconds?: number;
+  overtimeSeconds: number;
+  graceSeconds: number;
+  deductionSeconds: number;
+};
+
+export function previousWeekOvertimeDeduction(student: Student, sessions: Session[], settings: Settings, at = new Date()): WeeklyOvertimeDeduction {
+  const policy = normalizeWeeklyTimePolicy(settings.weeklyTimePolicy);
+  const currentWeek = schoolWeek(at, policy.resetDay);
+  const previousWeekEnd = currentWeek.start;
+  const previousWeekStart = new Date(previousWeekEnd.getFullYear(), previousWeekEnd.getMonth(), previousWeekEnd.getDate() - 7);
+  const allowance = effectiveWeeklyAllowance(student, { ...settings, weeklyTimePolicy: policy });
+  const previous = countedSessionsWithin(student.id, sessions, settings, previousWeekStart, previousWeekEnd, at);
+  const previousUsedSeconds = previous.reduce((total, session) => total + Math.max(0, session.durationSeconds), 0);
+  const graceSeconds = policy.overtimeGraceMinutes * 60;
+  const previousAllowanceSeconds = allowance.allowanceSeconds;
+  if (!policy.deductOvertimeNextWeek || previousAllowanceSeconds === undefined) {
+    return { previousWeekStart, previousWeekEnd, previousUsedSeconds, previousAllowanceSeconds, overtimeSeconds: 0, graceSeconds, deductionSeconds: 0 };
+  }
+  const overtimeSeconds = Math.max(0, previousUsedSeconds - previousAllowanceSeconds);
+  const deductionSeconds = Math.min(previousAllowanceSeconds, Math.max(0, overtimeSeconds - graceSeconds));
+  return { previousWeekStart, previousWeekEnd, previousUsedSeconds, previousAllowanceSeconds, overtimeSeconds, graceSeconds, deductionSeconds };
+}
+
 export type WeeklyTimeAssessment = {
   mode: WeeklyAllowanceMode;
+  baseAllowanceSeconds?: number;
   allowanceSeconds?: number;
+  deductionSeconds: number;
   usedSeconds: number;
   remainingSeconds?: number;
   overageSeconds: number;
@@ -94,23 +128,24 @@ export type WeeklyTimeAssessment = {
 export function assessWeeklyTime(student: Student, sessions: Session[], settings: Settings, at = new Date()): WeeklyTimeAssessment {
   const policy = normalizeWeeklyTimePolicy(settings.weeklyTimePolicy);
   const { start, end } = schoolWeek(at, policy.resetDay);
-  const allowance = effectiveWeeklyAllowance(student, { ...settings, weeklyTimePolicy: policy });
+  const baseAllowance = effectiveWeeklyAllowance(student, { ...settings, weeklyTimePolicy: policy });
+  const deduction = previousWeekOvertimeDeduction(student, sessions, { ...settings, weeklyTimePolicy: policy }, at);
+  const allowanceSeconds = baseAllowance.allowanceSeconds === undefined ? undefined : Math.max(0, baseAllowance.allowanceSeconds - deduction.deductionSeconds);
   const counted = weeklyCountedSessions(student.id, sessions, { ...settings, weeklyTimePolicy: policy }, at);
   const usedSeconds = counted.reduce((total, session) => total + Math.max(0, session.durationSeconds), 0);
-  const remainingSeconds = allowance.allowanceSeconds === undefined ? undefined : Math.max(0, allowance.allowanceSeconds - usedSeconds);
-  const overageSeconds = allowance.allowanceSeconds === undefined ? 0 : Math.max(0, usedSeconds - allowance.allowanceSeconds);
+  const remainingSeconds = allowanceSeconds === undefined ? undefined : Math.max(0, allowanceSeconds - usedSeconds);
+  const overageSeconds = allowanceSeconds === undefined ? 0 : Math.max(0, usedSeconds - allowanceSeconds);
   return {
-    mode: allowance.mode,
-    allowanceSeconds: allowance.allowanceSeconds,
+    mode: baseAllowance.mode,
+    baseAllowanceSeconds: baseAllowance.allowanceSeconds,
+    allowanceSeconds,
+    deductionSeconds: deduction.deductionSeconds,
     usedSeconds,
     remainingSeconds,
     overageSeconds,
-    blocked: allowance.allowanceSeconds !== undefined && usedSeconds >= allowance.allowanceSeconds,
-    automaticSuspensionTriggered: allowance.allowanceSeconds !== undefined
-      && policy.enabled
-      && policy.automaticSuspensionEnabled
-      && overageSeconds > 0
-      && overageSeconds >= policy.overageGraceMinutes * 60,
+    blocked: allowanceSeconds !== undefined && usedSeconds >= allowanceSeconds,
+    // Weekly automatic suspensions are deprecated. This field remains for service compatibility.
+    automaticSuspensionTriggered: false,
     weekStart: start,
     weekEnd: end,
     countedSessions: counted,
@@ -136,36 +171,11 @@ export function weeklyTimeWarningMessage(student: Student, sessions: Session[], 
   return `You have ${formatWeeklyDuration(assessment.remainingSeconds)} of bathroom time remaining this week.`;
 }
 
-function newestWeeklySession(assessment: WeeklyTimeAssessment) {
-  return [...assessment.countedSessions].sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];
-}
-
 export function reconcileStudentWeeklyTime(student: Student, sessions: Session[], settings: Settings, at = new Date(), forceCurrentCrossing = false): Student {
-  const policy = normalizeWeeklyTimePolicy(settings.weeklyTimePolicy);
-  const source = student.passSuspension?.source;
-  const isWeeklySuspension = student.passSuspension?.kind === 'automatic' && source === 'weekly-time';
-  const assessment = assessWeeklyTime(student, sessions, { ...settings, weeklyTimePolicy: policy }, at);
-  const active = student.passSuspension && new Date(student.passSuspension.endsAt).getTime() > at.getTime();
-  if (isWeeklySuspension && active && (!policy.enabled || !policy.automaticSuspensionEnabled || assessment.mode === 'unlimited')) {
-    return { ...student, passSuspension: undefined, updatedAt: at.toISOString() };
-  }
-  if (active || !assessment.automaticSuspensionTriggered) return student;
-  const newest = newestWeeklySession(assessment);
-  if (!newest) return student;
-  const triggerKey = `weekly:${assessment.weekStart.toISOString()}:${newest.id}`;
-  if (!forceCurrentCrossing && student.lastWeeklyTimeSuspensionTriggerKey === triggerKey) return student;
-  const startedAt = at.toISOString();
-  return {
-    ...student,
-    passSuspension: {
-      kind: 'automatic',
-      source: 'weekly-time',
-      startedAt,
-      endsAt: new Date(at.getTime() + policy.suspensionDays * DAY_MS).toISOString(),
-      reasons: [`Weekly bathroom-time allowance exceeded by ${formatWeeklyDuration(assessment.overageSeconds)}.`],
-      triggerKey,
-    },
-    lastWeeklyTimeSuspensionTriggerKey: triggerKey,
-    updatedAt: startedAt,
-  };
+  void sessions;
+  void settings;
+  void at;
+  void forceCurrentCrossing;
+  // Older weekly automatic suspensions remain stored, but this version never creates or removes one.
+  return student;
 }

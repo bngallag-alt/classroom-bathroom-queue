@@ -175,6 +175,21 @@
   padding: .25rem .25rem 0;
 }
 
+.weekly-time-advanced label small {
+  color: #526b7a;
+  font-weight: 500;
+}
+
+.weekly-overtime-deduction {
+  margin: .75rem 0 1rem;
+  padding: .8rem 1rem;
+  border-left: 5px solid #c38b00;
+  border-radius: 8px;
+  background: #fff3b0;
+  color: #604d00;
+  font-weight: 800;
+}
+
 @media (max-width: 800px) {
   .usage-mode-selector {
     grid-template-columns: 1fr;
