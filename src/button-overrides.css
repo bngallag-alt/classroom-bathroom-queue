@@ -53,6 +53,74 @@
   margin-bottom: 1rem;
 }
 
+.usage-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.2rem;
+  padding: 0;
+  border: 0;
+}
+
+.usage-mode-selector legend {
+  width: 100%;
+  margin-bottom: .7rem;
+  font-weight: 800;
+}
+
+.usage-mode-selector label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: .8rem;
+  margin: 0;
+  padding: 1rem;
+  border: 2px solid #b9cbd6;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.usage-mode-selector label.selected {
+  border-color: #126a62;
+  background: #e6f5f2;
+  box-shadow: 0 0 0 2px #126a6222;
+}
+
+.usage-mode-selector input {
+  width: 1.35rem;
+  height: 1.35rem;
+  min-height: auto;
+  flex: 0 0 auto;
+}
+
+.usage-mode-selector span {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.usage-mode-selector small {
+  color: #526b7a;
+  font-weight: 500;
+}
+
+.usage-mode-content {
+  max-width: 900px;
+}
+
+.nested-settings {
+  margin-top: 1.3rem;
+  padding: 1rem;
+  border: 1px solid #cbd9e1;
+  border-radius: 14px;
+  background: #f7fafb;
+}
+
+.nested-settings h3 {
+  margin-top: 0;
+}
+
 .advanced-disclosure {
   margin: 0 0 1.2rem;
 }
@@ -95,7 +163,7 @@
   margin-top: 1rem;
 }
 
-.pass-suspension-advanced .probation-settings {
+.bathroom-pass-advanced .probation-settings {
   margin-bottom: 0;
 }
 
@@ -108,6 +176,10 @@
 }
 
 @media (max-width: 800px) {
+  .usage-mode-selector {
+    grid-template-columns: 1fr;
+  }
+
   .teacher-tab-nav {
     display: flex !important;
   }

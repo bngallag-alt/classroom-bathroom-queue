@@ -96,6 +96,7 @@ function metricValue(metric: ProbationMetric, metrics: ProbationMetrics) {
 
 export function assessProbation(student: Student, sessions: Session[], settings: Settings, at = new Date()): ProbationAssessment {
   const policy = normalizeProbationPolicy(settings.probationPolicy);
+  const bathroomPassMode = settings.usageLimitMode === 'bathroom-passes';
   const metrics = student.probationExempt ? { completedUses: 0, overtimeCount: 0, overtimePercent: 0 } : probationMetrics(student.id, sessions, settings, at);
   const statuses = probationMetricOrder.filter((metric) => policy.rules[metric].enabled).map((metric) => {
     const value = metricValue(metric, metrics);
@@ -109,10 +110,11 @@ export function assessProbation(student: Student, sessions: Session[], settings:
     };
   });
   const suspensionMetrics = statuses.filter((status) => status.suspensionReached).map((status) => status.metric);
-  const warningMetrics = student.probationExempt || !policy.warningsEnabled
+  const warningMetrics = !bathroomPassMode || student.probationExempt || !policy.warningsEnabled
     ? []
     : statuses.filter((status) => status.warningReached && !status.suspensionReached).map((status) => status.metric);
-  const suspensionTriggered = !student.probationExempt
+  const suspensionTriggered = bathroomPassMode
+    && !student.probationExempt
     && policy.automaticSuspensionsEnabled
     && statuses.length > 0
     && suspensionMetrics.length > 0;

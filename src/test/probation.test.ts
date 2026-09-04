@@ -133,6 +133,27 @@ describe('policy evaluation and warnings', () => {
     expect(probationWarningMessages(student, [session('one', 1)], configured, at)[0]).toContain('1 more over-limit return');
   });
 
+  it('does not expose warning results when warnings are switched off', () => {
+    const configured = settings(normalizeProbationPolicy({
+      warningsEnabled: false,
+      automaticSuspensionsEnabled: false,
+      rules: { ...overtimeOnlyRules, overtimeCount: { enabled: true, warningThreshold: 1, suspensionThreshold: 2 } },
+    }));
+    const assessment = assessProbation(student, [session('one', 1)], configured, at);
+    expect(assessment.statuses[0]).toMatchObject({ warningReached: true });
+    expect(assessment.warningMetrics).toEqual([]);
+    expect(probationWarningMessages(student, [session('one', 1)], configured, at)).toEqual([]);
+  });
+
+  it('does not warn or newly suspend from overtime rules in weekly-time mode', () => {
+    const configured = { ...settings(enabledPolicy({ rules: overtimeOnlyRules })), usageLimitMode: 'weekly-time' as const };
+    const records = [session('one', 1), session('two', 2)];
+    const assessment = assessProbation(student, records, configured, at);
+    expect(assessment.warningMetrics).toEqual([]);
+    expect(assessment.suspensionTriggered).toBe(false);
+    expect(reconcileStudentProbation(student, records, configured, at).passSuspension).toBeUndefined();
+  });
+
   it('ignores legacy use, percentage, and trigger-mode rules', () => {
     const onTimeRecords = [session('one', 1, { overLimit: false }), session('two', 2, { overLimit: false })];
     const configured = settings(enabledPolicy({ triggerMode: 'all', rules: overtimeOnlyRules }));
@@ -179,6 +200,15 @@ describe('suspension lifecycle and compatibility', () => {
     expect(reconcileStudentProbation(suspended, [...records, later], configured, afterExpiry).passSuspension?.startedAt).toBe(suspended.passSuspension?.startedAt);
     const rearmed = reconcileStudentProbation({ ...suspended, lastAutoSuspensionTriggerKey: undefined }, records, configured, afterExpiry, true);
     expect(rearmed.passSuspension?.startedAt).toBe(afterExpiry.toISOString());
+  });
+
+  it('keeps an existing rolling suspension active after switching to weekly-time mode', () => {
+    const configured = settings(policy);
+    const records = [session('one', 2), session('two', 1)];
+    const suspended = reconcileStudentProbation(student, records, configured, at);
+    const weeklyMode = { ...configured, usageLimitMode: 'weekly-time' as const, weeklyTimePolicy: { ...configured.weeklyTimePolicy, enabled: true } };
+    expect(activePassSuspension(suspended, weeklyMode, at)).toEqual(suspended.passSuspension);
+    expect(reconcileStudentProbation(suspended, records, weeklyMode, at).passSuspension).toEqual(suspended.passSuspension);
   });
 
   it('does not treat an unrelated policy edit as a new crossing, while explicit rearm still works', async () => {

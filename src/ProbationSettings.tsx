@@ -74,6 +74,6 @@ export default function ProbationSettings({
     </div>
     {error && <p className="error" role="alert">{error}</p>}
     <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save Automatic Suspension Settings'}</button>
-    <p><small>This feature is disabled by default. Temporary suspensions, permanent roster bans, ordinary pass limits, and weekly-time rules remain separate.</small></p>
+    <p><small>This feature is disabled by default. It applies only while Bathroom Passes is the selected usage limit.</small></p>
   </section>;
 }

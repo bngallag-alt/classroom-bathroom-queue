@@ -32,7 +32,7 @@ export default function ProbationPanel({
     const assessment = assessProbation(student, sessions, settings, at);
     const suspension = activePassSuspension(student, settings, at);
     const weekly = assessWeeklyTime(student, sessions, settings, at);
-    const reached = assessment.statuses.filter((status) => status.warningReached).map((status) => status.metric);
+    const reached = assessment.warningMetrics;
     return { student, assessment, suspension, weekly, reached };
   }).filter((row) => row.reached.length || row.weekly.blocked || row.suspension || row.student.banned || row.student.probationExempt).sort((a, b) => a.student.name.localeCompare(b.student.name)), [students, sessions, settings]);
 
